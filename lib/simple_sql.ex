@@ -14,18 +14,21 @@ defmodule CommonParser.SimpleSql do
   import NimbleParsec
   import CommonParser.Helper
 
-  tag = ascii_tag_with_space()
+  tag = parse_tag()
 
   defcombinatorp :tag_list,
                  choice([
                    tag
+                   |> concat(ignore_space())
                    |> concat(ignore_sep(","))
+                   |> concat(ignore_space())
                    |> concat(parsec(:tag_list)),
                    tag
                  ])
 
   defcombinatorp :selector,
                  ignore_keyword("select")
+                 |> concat(ignore_space())
                  |> concat(
                    choice([
                      string("*"),
@@ -37,13 +40,19 @@ defmodule CommonParser.SimpleSql do
                  |> unwrap_and_tag(:select)
 
   from =
-    ignore_keyword("from") |> concat(tag) |> reduce({:parser_result_to_atom, []}) |> tag(:from)
+    ignore_keyword("from")
+    |> concat(ignore_space())
+    |> concat(tag)
+    |> concat(ignore_space())
+    |> reduce({:parser_result_to_atom, []})
+    |> tag(:from)
 
   condition = ascii_string([], min: 1) |> tag(:where)
 
-  # for where condition, we don't allow
+  # for where condition, we don't allow subquery
   where_cond =
     ignore_keyword("where")
+    |> concat(ignore_space())
     |> concat(condition)
     |> optional()
 
@@ -54,6 +63,7 @@ defmodule CommonParser.SimpleSql do
 
     iex> CommonParser.SimpleSql.parse_select("select *")
     {:ok, [select: ["*"]], "", %{}, {1, 0}, 8}
+
     iex> CommonParser.SimpleSql.parse_select("select a, b, c, a")
     {:ok, [select: ["a", "b", "c"]], "", %{}, {1, 0}, 17}
 
@@ -65,16 +75,18 @@ defmodule CommonParser.SimpleSql do
 
     iex> CommonParser.SimpleSql.parse_from("from abc")
     {:ok, [from: [:abc]], "", %{}, {1, 0}, 8}
+
     iex(4)> CommonParser.SimpleSql.parse_from("from abc, def")
     {:ok, [from: [:abc]], ", def", %{}, {1, 0}, 8}
   """
   defparsec :parse_from, from
 
   @doc """
-  parse a full sql
+  parse a full sql. Note that where condition is not parsed. You can use `CommonParser.Expr.parse/2` to validate the where condition.
 
     iex> CommonParser.SimpleSql.parse("select * from abc where c < 10")
     {:ok, [select: ["*"], from: [:abc], where: ["c < 10"]], "", %{}, {1, 0}, 30}
+
     iex(7)> CommonParser.SimpleSql.parse(~S(select balance, nonce, num_txs from abc where c < 10 and b not in ["c", "d"]))
     {:ok, [select: ["balance", "nonce", "num_txs"], from: [:abc], where: [~S(c < 10 and b not in ["c", "d"])]], "", %{}, {1, 0}, 76}
 
